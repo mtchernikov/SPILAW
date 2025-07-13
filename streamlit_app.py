@@ -10,7 +10,7 @@ from langchain.llms import OpenAI as OpenAILLM
 import pandas as pd
 
 # Set API Key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Define categories
 categories = [
