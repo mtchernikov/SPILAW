@@ -2,4 +2,5 @@ streamlit
 openai
 pandas
 langchain
-faiss-cpu==1.7.4
+langchain-community
+faiss-cpu
