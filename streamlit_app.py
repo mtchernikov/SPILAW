@@ -41,16 +41,15 @@ if uploaded_file:
         qa_chain = RetrievalQA.from_chain_type(llm=OpenAILLM(temperature=0), retriever=retriever)
         result = qa_chain.run(query)
 
-        # Prompt LLM to generate SPI from legal text
-        st.markdown("### CVC-Based SPI Table:")
-        prompt = (
-            "You are a traffic safety expert. The following are legal requirements from the CVC. "
-            "For each, derive a Safety Performance Indicator (SPI) that can be used to measure compliance. "
-            "Show the result as a markdown table with two columns:\n"
-            "1. CVC Requirement (include paragraph reference)\n"
-            "2. Derived SPI\n\n"
-            f"Text:\n{result.strip()}"
-        )
+      prompt = (
+                "You are a traffic safety expert. The following are legal requirements from the CVC. "
+                 "For each, derive a Safety Performance Indicator (SPI) that can be used to measure compliance. "
+                  "Show the result as a markdown table with three columns:\n"
+                     "1. CVC Section (e.g. §22500(a))\n"
+                     "2. CVC Requirement\n"
+                     "3. Derived SPI\n\n"
+                      f"Text:\n{result.strip()}"
+                 )
 
         spi_chain = OpenAILLM(temperature=0)
         table_result = spi_chain(prompt)
@@ -63,25 +62,31 @@ if uploaded_file:
             "Generated SPI Table": table_result.strip()
         })
 
-# Display download option
+# Save results to session
+lines = table_result.strip().splitlines()
+parsed_rows = []
+
+for line in lines:
+    if "|" in line and not line.strip().startswith("|---"):
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) >= 4:
+            section = parts[1]
+            requirement = parts[2]
+            spi = parts[3]
+            parsed_rows.append({
+                "CVC Section": section,
+                "CVC Requirement": requirement,
+                "Derived SPI": spi
+            })
+
+if parsed_rows:
+    st.session_state["results"].extend(parsed_rows)
+
+# Display Table
 if st.session_state["results"]:
-    st.markdown("### Export All Results")
+    st.markdown("### SPI Table with Section Info")
+    df = pd.DataFrame(st.session_state["results"])
+    st.dataframe(df, use_container_width=True)
 
-    rows = []
-    for item in st.session_state["results"]:
-        # Attempt to parse the markdown table into rows
-        lines = item["Generated SPI Table"].splitlines()
-        for line in lines:
-            if "|" in line and not line.strip().startswith("|---"):
-                parts = [part.strip() for part in line.split("|")]
-                if len(parts) >= 3:
-                    rows.append({
-                        "CVC Requirement": parts[1],
-                        "Derived SPI": parts[2]
-                    })
-
-    if rows:
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True)
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("📤 Export SPI Table as CSV", data=csv, file_name="spi_table.csv", mime="text/csv")
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("📤 Export SPI Table as CSV", data=csv, file_name="spi_table.csv", mime="text/csv")
