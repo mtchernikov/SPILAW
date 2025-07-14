@@ -12,25 +12,12 @@ import pandas as pd
 # Set API Key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Define categories
-categories = [
-    "Functional Safety Requirement",
-    "Operational Design Domain (ODD)",
-    "Human-Machine Interaction",
-    "Perception and Sensor Compliance",
-    "Actuation and Control",
-    "Fallback and Fail-Operational",
-    "Post-Market Monitoring",
-    "Cybersecurity Interface",
-    "Legal/Traffic Compliance",
-    "Not Categorized"
-]
-
 # Initialize session state
 if "results" not in st.session_state:
     st.session_state["results"] = []
 
-st.title("SPI Extraction and Categorization from CVC Upload")
+st.set_page_config(layout="wide")
+st.title("SPI Generation from California Vehicle Code (CVC)")
 
 # Step 1: Upload document
 uploaded_file = st.file_uploader("Upload a CVC or traffic law .txt file", type=["txt"])
@@ -47,30 +34,54 @@ if uploaded_file:
         vector_db = FAISS.from_documents(chunks, embeddings)
 
     # Step 3: Run query
-    st.markdown("### Extract SPI-relevant legal requirements:")
-    query = st.text_input("Query the document", value="List all stopping and parking violations.")
-    if st.button("Extract Requirements"):
-        retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    st.markdown("### SPI Extraction")
+    query = st.text_input("Ask for relevant traffic rules", value="List all stopping and parking violations.")
+    if st.button("Generate SPI Table"):
+        retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 8})
         qa_chain = RetrievalQA.from_chain_type(llm=OpenAILLM(temperature=0), retriever=retriever)
         result = qa_chain.run(query)
 
-        st.markdown("### Retrieved Legal Requirement:")
-        st.code(result, language="text")
+        # Prompt LLM to generate SPI from legal text
+        st.markdown("### CVC-Based SPI Table:")
+        prompt = (
+            "You are a traffic safety expert. The following are legal requirements from the CVC. "
+            "For each, derive a Safety Performance Indicator (SPI) that can be used to measure compliance. "
+            "Show the result as a markdown table with two columns:\n"
+            "1. CVC Requirement (include paragraph reference)\n"
+            "2. Derived SPI\n\n"
+            f"Text:\n{result.strip()}"
+        )
 
-        st.markdown("### Categorize the extracted requirement:")
-        selected_category = st.selectbox("Choose category", categories)
-        if st.button("Confirm Category"):
-            st.session_state["results"].append({
-                "Requirement": result.strip(),
-                "Category": selected_category
-            })
-            st.success(f"Requirement categorized as: **{selected_category}**")
+        spi_chain = OpenAILLM(temperature=0)
+        table_result = spi_chain(prompt)
 
-# Display results table and export
+        st.markdown(table_result, unsafe_allow_html=True)
+
+        # Save results to session
+        st.session_state["results"].append({
+            "Extracted CVC Requirements": result.strip(),
+            "Generated SPI Table": table_result.strip()
+        })
+
+# Display download option
 if st.session_state["results"]:
-    st.markdown("### Categorized Results Table")
-    df = pd.DataFrame(st.session_state["results"])
-    st.dataframe(df)
+    st.markdown("### Export All Results")
 
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("📤 Export as CSV", data=csv, file_name="categorized_spi_requirements.csv", mime="text/csv")
+    rows = []
+    for item in st.session_state["results"]:
+        # Attempt to parse the markdown table into rows
+        lines = item["Generated SPI Table"].splitlines()
+        for line in lines:
+            if "|" in line and not line.strip().startswith("|---"):
+                parts = [part.strip() for part in line.split("|")]
+                if len(parts) >= 3:
+                    rows.append({
+                        "CVC Requirement": parts[1],
+                        "Derived SPI": parts[2]
+                    })
+
+    if rows:
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True)
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("📤 Export SPI Table as CSV", data=csv, file_name="spi_table.csv", mime="text/csv")
