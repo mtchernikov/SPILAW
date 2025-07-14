@@ -1,4 +1,5 @@
 import streamlit as st
+st.set_page_config(layout="wide")
 import os
 import openai
 from langchain_community.vectorstores import FAISS
