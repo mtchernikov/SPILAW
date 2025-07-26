@@ -45,14 +45,17 @@ if uploaded_file:
         with st.spinner("Generating Requirements and SPIs..."):
             llm = OpenAILLM(temperature=0)
             full_prompt = (
-                "You are a traffic safety analyst. The following are sections from the California Vehicle Code. "
-                "For each section, extract the CVC section number, the requirement, and a Safety Performance Indicator (SPI) that could measure compliance. "
-                "Present results in a markdown table with columns:\n"
-                "1. CVC Section (e.g., §22500(a))\n"
-                "2. CVC Requirement\n"
-                "3. Derived SPI\n\n"
+                "You are an expert in traffic safety and functional safety of autonomous vehicles. "
+                "The following is a collection of traffic law requirements. "
+                "Your task is to extract only the requirements that apply to **vehicle behavior or system performance**, "
+               "not to pedestrians, cyclists, or human drivers. Ignore rules that do not involve the vehicle's responsibility or actions.\n\n"
+                "From the relevant ones, derive a Safety Performance Indicator (SPI) that an autonomous driving system could use to demonstrate compliance.\n\n"
+                "Present the result as a markdown table with 3 columns:\n"
+                "1. CVC Section (e.g. §22500(a))\n"
+                "2. CVC Requirement (summarized if needed)\n"
+                "3. Derived SPI (specific measurable performance or behavior)\n\n"
                 f"Text:\n{requirement_text.strip()}"
-            )
+                )
             table_result = llm.invoke(full_prompt)
 
         st.markdown("### Derived SPI Table")
