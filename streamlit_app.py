@@ -1,153 +1,102 @@
 import streamlit as st
 st.set_page_config(layout="wide")
 
-import openai
-import pandas as pd
-
+from openai import OpenAI
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
+import pandas as pd
 
-# -------------------------
-# Config
-# -------------------------
-OPENAI_MODEL = "gpt-4o-mini"  # adapt to what you have
-TOP_K = 8                     # how many chunks from RAG to feed into the single LLM run
-MAX_CHARS = 60000             # safety cap to avoid overlong prompts
+# Set OpenAI API client
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+OPENAI_MODEL = "gpt-4o"
 
-# -------------------------
-# Utils
-# -------------------------
-def sanitize(text: str, max_chars: int = MAX_CHARS) -> str:
-    return text[:max_chars]
-
-def parse_markdown_table(md: str):
-    """Parse a markdown table into (header, rows). Returns header list and list[dict]."""
-    lines = [l for l in md.strip().splitlines() if l.strip()]
-    if not lines:
-        return [], []
-    # find header & separator
-    header_idx = None
-    for i, l in enumerate(lines):
-        if "|" in l:
-            if i + 1 < len(lines) and set(lines[i + 1].replace("|", "").strip()) <= set("-: "):
-                header_idx = i
-                break
-    if header_idx is None:
-        return [], []
-    header = [h.strip() for h in lines[header_idx].split("|") if h.strip()]
-    data_lines = []
-    for l in lines[header_idx + 2 :]:
-        if "|" not in l:
-            continue
-        parts = [p.strip() for p in l.split("|")]
-        # remove empty first/last caused by leading/trailing |
-        if parts and parts[0] == "":
-            parts = parts[1:]
-        if parts and parts[-1] == "":
-            parts = parts[:-1]
-        if len(parts) != len(header):
-            continue
-        data_lines.append(dict(zip(header, parts)))
-    return header, data_lines
-
-# -------------------------
-# App
-# -------------------------
-st.title("One-shot RAG ➜ Derived Requirements + Ambiguity + SPI (characteristic)")
-
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-
+# Session state
 if "results" not in st.session_state:
     st.session_state["results"] = []
 
-uploaded_file = st.file_uploader("Upload traffic law (.txt)", type=["txt"])
+st.title("📄 SPI Derivation from Uploaded Traffic Law (Autonomous Driving)")
 
+# Step 1: Upload document
+uploaded_file = st.file_uploader("Upload traffic law or regulation (.txt)", type=["txt"])
 if uploaded_file:
+    st.success("Document uploaded successfully.")
     raw_text = uploaded_file.read().decode("utf-8")
-    st.success("Document uploaded.")
 
-    with st.spinner("Indexing with FAISS (RAG)…"):
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+    # Step 2: Embed for retrieval
+    with st.spinner("Embedding and indexing document..."):
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
         docs = [Document(page_content=raw_text)]
         chunks = splitter.split_documents(docs)
         embeddings = OpenAIEmbeddings()
         vector_db = FAISS.from_documents(chunks, embeddings)
 
-    query = st.text_input(
-        "Query (what parts of the law do you want to derive requirements & SPIs from?)",
-        value="All rules that constrain the behavior of an autonomous vehicle, including stopping, yielding, signaling, parking, and interaction with pedestrians."
-    )
+    # Step 3: Derive requirements and SPI
+    st.markdown("### 🔍 Query to extract legal requirements & derive SPIs")
+    query = st.text_input("Query the document", value="List requirements for stopping, yielding and pedestrian safety.")
+    if st.button("Run Extraction and Derivation"):
+        with st.spinner("Retrieving and deriving..."):
+            retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+            relevant_docs = retriever.get_relevant_documents(query)
+            combined_text = "\n\n".join([doc.page_content for doc in relevant_docs])
 
-    if st.button("Run single-shot derivation"):
-        with st.spinner("Retrieving relevant law text…"):
-            retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K})
-            retrieved_docs = retriever.get_relevant_documents(query)
-            joined = "\n\n---\n\n".join(d.page_content for d in retrieved_docs)
-            law_context = sanitize(joined)
-
-        with st.spinner("LLM deriving requirements, ambiguity & SPI (single run)…"):
             prompt = f"""
-You are a traffic safety and functional safety expert for autonomous driving systems.
+You are an expert in traffic law and safety performance indicators (SPIs) for autonomous driving.
 
-**Goal**:
-From the legal text (California Vehicle Code or similar), extract only requirements that apply to the **autonomous vehicle/system behavior**.
-Ignore obligations on third parties (e.g., pedestrians must wear helmets, cyclists must do X, administrative rules, penalty clauses).
+Given the legal text below, extract relevant legal requirements (only those that apply to **vehicle behavior**, not general public behavior) and for each:
 
-For each relevant section:
-1) Provide the **CVC Section** (e.g., §22500(a)) if present or infer it from the text.
-2) Provide a concise **Derived Requirement** phrased as an implementation-neutral, deterministic requirement (using “shall”).
-3) Provide **Ambiguity of requirement**: short note on where the law is vague or needs technical interpretation (timing, distances, thresholds, sensor limitations, etc.).
-4) Provide an **SPI** (Safety Performance Indicator) as a **measurable characteristic** (NOT another requirement). Example: “Number of red-light violations per 1000 km”, “Mean time to yield before crosswalk entry (s)”, “Percentage of correct lane selection before intersection (%)”.
-5) Provide **Advice / Reference**: point to related sections (e.g., emergency lights section) or standards (FMVSS, MUTCD, UNECE, ISO 26262/21448, UL 4600) that should be consulted to clarify ambiguity or complete implementation.
+1. Identify its **legal section** (e.g., §22101 or article number).
+2. Summarize the **requirement** precisely.
+3. Analyze the **ambiguity** (e.g. undefined conditions like "yield to pedestrians").
+4. Propose a **recommendation** (e.g. refer to another section, define thresholds).
+5. Derive a measurable **SPI** characterizing vehicle/system behavior (e.g., "time-to-yield < 2s when pedestrian detected").
 
-**Output ONLY a markdown table** with **exactly these columns** in this order:
+Return as a markdown table with the following 5 columns:
 
-| CVC Section | Derived Requirement | Ambiguity of requirement | SPI | Advice / Reference |
+| CVC Section | Derived Requirement | Ambiguity / Open Elements | Recommendation / Reference | Safety Performance Indicator (SPI) |
 
 Text to analyze:
-\"\"\" 
-{law_context}
-\"\"\" 
+{combined_text}
 """
-            completion = openai.ChatCompletion.create(
+
+            response = client.chat.completions.create(
                 model=OPENAI_MODEL,
                 temperature=0,
                 messages=[
-                    {"role": "system", "content": "You are an expert in traffic law, safety engineering, and SPI definition for autonomous vehicles."},
+                    {"role": "system", "content": "You are a legal analyst and automotive safety engineer."},
                     {"role": "user", "content": prompt}
                 ]
             )
-            md_table = completion["choices"][0]["message"]["content"]
+            md_table = response.choices[0].message.content.strip()
 
-        st.markdown("### LLM Output (raw markdown)")
-        st.markdown(md_table)
+            st.markdown("### ✅ Extracted Requirements and SPIs")
+            st.markdown(md_table)
 
-        header, rows = parse_markdown_table(md_table)
-        if not rows:
-            st.error("Could not parse a valid table from model output. You may need to refine the prompt or increase k.")
-        else:
-            # Ensure the expected columns exist
-            expected = ["CVC Section", "Derived Requirement", "Ambiguity of requirement", "SPI", "Advice / Reference"]
-            for col in expected:
-                if col not in rows[0]:
-                    st.error(f"Column '{col}' missing in LLM output. Please re-run or tweak the prompt.")
-                    st.stop()
+            # Parse markdown to table
+            lines = md_table.splitlines()
+            parsed_rows = []
+            for line in lines:
+                if "|" in line and not line.strip().startswith("|---"):
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) >= 6:
+                        parsed_rows.append({
+                            "CVC Section": parts[1],
+                            "Derived Requirement": parts[2],
+                            "Ambiguity / Open Elements": parts[3],
+                            "Recommendation / Reference": parts[4],
+                            "SPI": parts[5],
+                        })
 
-            st.session_state["results"] = rows
-            st.success(f"Extracted {len(rows)} rows.")
+            if parsed_rows:
+                st.session_state["results"].extend(parsed_rows)
+                st.success("✅ Parsed table successfully.")
 
-# Show & export
+# Step 4: Display and export
 if st.session_state["results"]:
-    st.markdown("### Final Table")
+    st.markdown("### 📊 Final SPI Table")
     df = pd.DataFrame(st.session_state["results"])
     st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "📤 Export CSV",
-        data=csv,
-        file_name="cvc_requirements_with_spi_and_ambiguity.csv",
-        mime="text/csv"
-    )
+    st.download_button("📥 Export as CSV", data=csv, file_name="spi_table.csv", mime="text/csv")
