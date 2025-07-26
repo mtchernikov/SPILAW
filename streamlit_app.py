@@ -49,13 +49,14 @@ Given the legal text below, extract relevant legal requirements (only those that
 1. Identify its **legal section** (e.g., §22101 or article number).
 2. Summarize the **requirement** precisely.
 3. Analyze the **ambiguity** (e.g. undefined conditions like "yield to pedestrians").
-4. Propose a **recommendation** (e.g. refer to another section, define thresholds, provide web-link with more information legal/government source).
+4. Propose a **recommendation** (e.g. refer to another section and internet link, define thresholds, provide web-link with more information legal/government source).
 5. Derive a measurable **SPI** characterizing vehicle/system behavior (e.g., "time-to-yield < 2s when pedestrian detected").
 
 Return as a markdown table with the following 5 columns:
 
 | CVC Section | Derived Requirement | Ambiguity / Open Elements | Recommendation / Reference | Safety Performance Indicator (SPI) |
 
+If no matches clearly say so. E.g. there is no information about ice cream
 Text to analyze:
 {combined_text}
 """
