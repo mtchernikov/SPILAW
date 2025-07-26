@@ -56,7 +56,6 @@ Return as a markdown table with the following 5 columns:
 
 | CVC Section | Derived Requirement | Ambiguity / Open Elements | Recommendation / Reference | Safety Performance Indicator (SPI) |
 
-If no matches clearly say so. E.g. there is no information about ice cream
 Text to analyze:
 {combined_text}
 """
